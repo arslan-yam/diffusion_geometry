@@ -1,0 +1,9 @@
+# torch/torchvision are installed by hpc/setup_login.sh (CUDA build chosen there)
+torch==2.5.1
+torchvision==0.20.1
+numpy<2
+scipy
+scikit-learn
+opt_einsum
+diffusers==0.31.0
+huggingface_hub==0.25.2

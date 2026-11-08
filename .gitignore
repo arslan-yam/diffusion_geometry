@@ -1,0 +1,9 @@
+results/
+logs/
+data/
+.cache/
+__pycache__/
+*.pt
+*.pyc
+.DS_Store
+_to_delete/
