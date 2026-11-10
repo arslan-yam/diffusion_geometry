@@ -55,16 +55,27 @@ def summ(S, Sgt, scale):
     return o
 
 
-def eval_tweedie(Dsig, Y, d, label):
+def eval_tweedie(Dsig, Y, d, label, Hgt=None):
+    """Hgt: true mean-curvature vectors (n x D). Also evaluates the derivative-free mean curvature
+    H_df = (2/eps) P_N (D(x) - x) and the log-density gradient |grad log q| = |P_T (D(x) - x)| / eps."""
     res = {}
     for s in SIG:
         Dfn = lambda y: Dsig(y, s)
-        Ss, Sr, gaps, H = [], [], [], []
+        Ss, Sr, gaps, Hdf, Hsp, gq = [], [], [], [], [], []
         t = time.time()
         for y in Y:
             o = tweedie_curvature(Dfn, y, d)
             Ss.append(o["S_sp"].item()); Sr.append(o["S_raw"].item()); gaps.append(o["gap"].item())
-        res[s] = dict(S_sp=np.array(Ss), S_raw=np.array(Sr), gap=float(np.median(gaps)), time=time.time() - t)
+            with torch.no_grad():
+                r = Dfn(y) - y; E = o["E"]; rT = E @ (E.T @ r)
+            Hdf.append(((2 / s**2) * (r - rT)).cpu().numpy()); gq.append(rT.norm().item() / s**2)
+            Hsp.append(torch.einsum("iil->l", o["II"]).detach().cpu().numpy())
+        res[s] = dict(S_sp=np.array(Ss), S_raw=np.array(Sr), gap=float(np.median(gaps)), time=time.time() - t,
+                      gradlogq=float(np.median(gq)))
+        if Hgt is not None:
+            sc = np.linalg.norm(Hgt, axis=1).mean() + 1e-12
+            res[s]["H_df_err"] = float(np.linalg.norm(np.array(Hdf) - Hgt, axis=1).mean() / sc)
+            res[s]["H_sp_err"] = float(np.linalg.norm(np.array(Hsp) - Hgt, axis=1).mean() / sc)
     return res
 
 
@@ -86,6 +97,7 @@ for man in a.mans.split(","):
                 Sgt, IIgt, _ = M.gt(torch.tensor(Qn, dtype=torch.float64))
                 Sgt = Sgt.numpy(); IIgt = IIgt.numpy()
                 Hg = np.einsum("niil->nl", IIgt)
+                HgD = Hg @ Q.T                                    # true mean-curvature vectors in R^D
                 scale = float((np.sum(Hg**2, 1) + np.sum(IIgt**2, (1, 2, 3))).mean())
                 R = dict(man=man, d=d, n=n, seed=seed, D=D, noise=a.noise, S_gt_mean=float(Sgt.mean()), scale=scale, methods={})
                 print(f"== {man} d={d} D={D} n={n} seed={seed}", flush=True)
@@ -108,7 +120,7 @@ for man in a.mans.split(","):
                             R["methods"][tag] = {"error": repr(e)[:200]}
                 if "kernel" in bl and n <= 200000:
                     Kd = kernel_denoiser(torch.tensor(X, dtype=edt, device=dev))
-                    res = eval_tweedie(Kd, torch.tensor(Qy, dtype=edt, device=dev), d, "kernel")
+                    res = eval_tweedie(Kd, torch.tensor(Qy, dtype=edt, device=dev), d, "kernel", HgD)
                     valid = {s: r for s, r in res.items() if r["gap"] > 0.25}
                     if valid:
                         so = min(valid, key=lambda s: np.abs(valid[s]["S_sp"] - Sgt).mean())
@@ -128,7 +140,7 @@ for man in a.mans.split(","):
                     Yq = torch.tensor(Qy, dtype=edt, device=dev)
                     if a.noise > 0:                               # project noisy queries
                         for _ in range(3): Yq = Dnet(Yq, a.noise)
-                res = eval_tweedie(lambda y, s: Dnet(y, s), Yq, d, "neural")
+                res = eval_tweedie(lambda y, s: Dnet(y, s), Yq, d, "neural", HgD)
                 valid = {s: r for s, r in res.items() if r["gap"] > 0.25}
                 if valid:
                     sa = max(valid, key=lambda s: valid[s]["gap"])
@@ -136,7 +148,9 @@ for man in a.mans.split(","):
                     R["methods"]["neural_auto"] = dict(summ(valid[sa]["S_sp"], Sgt, scale), sigma=sa, gap=valid[sa]["gap"])
                     R["methods"]["neural_oracle"] = dict(summ(valid[so]["S_sp"], Sgt, scale), sigma=so)
                     R["methods"]["neural_raw_auto"] = dict(summ(valid[sa]["S_raw"], Sgt, scale), sigma=sa)
-                R["methods"]["neural_grid"] = {f"{s:.4f}": dict(gap=r["gap"], **summ(r["S_sp"], Sgt, scale)) for s, r in res.items()}
+                    R["methods"]["neural_byproducts_auto"] = {k: valid[sa].get(k) for k in ("H_df_err", "H_sp_err", "gradlogq")}
+                R["methods"]["neural_grid"] = {f"{s:.4f}": dict(gap=r["gap"], H_df_err=r.get("H_df_err"), H_sp_err=r.get("H_sp_err"),
+                                                         gradlogq=r["gradlogq"], **summ(r["S_sp"], Sgt, scale)) for s, r in res.items()}
                 R["train_time"] = ttrain; R["steps"] = steps
                 with open(a.out, "a") as f: f.write(json.dumps(R) + "\n")
                 print("   ", {k: (v.get("nmae") if isinstance(v, dict) else None) for k, v in R["methods"].items() if k != "neural_grid"}, flush=True)

@@ -99,9 +99,17 @@ for split, ds in sets.items():
             dloc = int((lam > 0.5).sum().item()); dloc = max(2, min(dloc, a.k - 8))
             E = V[:, :dloc]; lt = lam[:dloc]; nu = lam[dloc:].median()
             h = hutchinson_scalar(Dfn, xf, E, lt, nu, m=a.m)
-            resid = float((Dm(xf.float(), s).double() - xf).norm())
+            with torch.no_grad():
+                r = Dm(xf.float(), s).double() - xf
+                rT = E @ (E.T @ r); rN = r - rT
+            eps = s * s
+            # Bakry-Emery by-products (Sec. 3.5): derivative-free mean curvature, log-density gradient and Laplacian
+            lap_logq = float((lt - 1).sum().item() / eps + 0.5 * h["H2"].item())
             rec["sig"][str(s)] = dict(dloc=dloc, lam=lam[:min(a.k, 128)].cpu().tolist(), S=h["S"].item(), S_se=h["S_se"].item(),
-                                 H2=h["H2"].item(), II2=h["II2"].item(), resid=resid, time=time.time() - t)
+                                 H2=h["H2"].item(), II2=h["II2"].item(), resid=float(r.norm()),
+                                 resid_T=float(rT.norm()), resid_N=float(rN.norm()),
+                                 H_df=float(2 * rN.norm() / eps), gradlogq=float(rT.norm() / eps), lap_logq=lap_logq,
+                                 time=time.time() - t)
         out["records"].append(rec)
         if len(out["records"]) % 10 == 0:
             json.dump(out, open(a.out + ".tmp", "w")); os.replace(a.out + ".tmp", a.out)
@@ -118,6 +126,6 @@ for s in map(float, a.sigmas.split(",")):
         for c in range(10):
             i = y == c; vr[i] = rankdata(v[i]) / i.sum(); mr[i] = rankdata(mg[i]) / i.sum()
         return spearmanr(vr, mr)
-    for name in ("dloc", "S", "H2", "II2", "resid"):
+    for name in ("dloc", "S", "H2", "II2", "resid", "H_df", "gradlogq", "lap_logq"):
         v = np.array([r["sig"][str(s)][name] for r in R])
         print(f"sigma={s} within-class spearman({name}, margin) = {within(v)}")
