@@ -125,7 +125,7 @@ def train_edm(net, X, steps, batch=512, lr=1e-3, sigma_range=(0.01, 2.0), ema=0.
             p.copy_(e)
     for p in net.parameters():
         p.requires_grad_(False)          # evaluation uses forward-mode AD only; avoid autograd graphs
-    return EDMDenoiser(net.eval(), mu, s, sd)
+    return EDMDenoiser(net.eval(), mu, s, sd).to(device)
 
 
 class DDPMAsDenoiser(nn.Module):
