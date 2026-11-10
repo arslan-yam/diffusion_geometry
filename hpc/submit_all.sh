@@ -2,7 +2,7 @@
 # Submits every experiment as its own job, in priority order. Safe to re-run: finished runs are skipped
 # (each script resumes from its results file), so after a crash just resubmit the same line.
 cd "$(dirname "$0")/.." && source hpc/config.sh && mkdir -p logs results
-[ "$ACCOUNT" = proj_XXXX ] && { echo "Set ACCOUNT in hpc/config.sh (run: mp)"; exit 1; }
+[ "$ACCOUNT" = proj_XXXX ] && { echo "Run: mp, then: echo proj_NNNN > ~/.dg_account"; exit 1; }
 G="-A $ACCOUNT --constraint=$GPU_CONSTRAINT"
 C="-A $ACCOUNT --constraint=$CPU_CONSTRAINT"
 gpu() { local name=$1 t=$2; shift 2; sbatch --parsable -J $name -o logs/$name.%j.out $G -t $t "${DEP[@]}" hpc/gpu.sbatch "$@"; }

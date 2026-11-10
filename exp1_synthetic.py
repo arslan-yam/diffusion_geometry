@@ -125,6 +125,10 @@ for man in a.mans.split(","):
                     if valid:
                         so = min(valid, key=lambda s: np.abs(valid[s]["S_sp"] - Sgt).mean())
                         R["methods"]["kernel_oracle"] = dict(summ(valid[so]["S_sp"], Sgt, scale), sigma=so)
+                        ks = sorted(res)
+                        stab = {ks[i]: np.mean(np.abs(res[ks[i]]["S_sp"] - res[ks[i + 1]]["S_sp"])) for i in range(len(ks) - 1) if ks[i] in valid}
+                        if stab:
+                            st = min(stab, key=stab.get); R["methods"]["kernel_stab"] = dict(summ(res[st]["S_sp"], Sgt, scale), sigma=st)
                 # ---------------- neural
                 if a.no_neural:
                     with open(a.out, "a") as f: f.write(json.dumps(R) + "\n")
@@ -148,6 +152,11 @@ for man in a.mans.split(","):
                     R["methods"]["neural_auto"] = dict(summ(valid[sa]["S_sp"], Sgt, scale), sigma=sa, gap=valid[sa]["gap"])
                     R["methods"]["neural_oracle"] = dict(summ(valid[so]["S_sp"], Sgt, scale), sigma=so)
                     R["methods"]["neural_raw_auto"] = dict(summ(valid[sa]["S_raw"], Sgt, scale), sigma=sa)
+                    ks = sorted(res)                               # stability rule: argmin_s mean|S(s) - S(sqrt2 s)| (no ground truth)
+                    stab = {ks[i]: np.mean(np.abs(res[ks[i]]["S_sp"] - res[ks[i + 1]]["S_sp"])) for i in range(len(ks) - 1) if ks[i] in valid}
+                    if stab:
+                        st = min(stab, key=stab.get)
+                        R["methods"]["neural_stab"] = dict(summ(res[st]["S_sp"], Sgt, scale), sigma=st)
                     R["methods"]["neural_byproducts_auto"] = {k: valid[sa].get(k) for k in ("H_df_err", "H_sp_err", "gradlogq")}
                 R["methods"]["neural_grid"] = {f"{s:.4f}": dict(gap=r["gap"], H_df_err=r.get("H_df_err"), H_sp_err=r.get("H_sp_err"),
                                                          gradlogq=r["gradlogq"], **summ(r["S_sp"], Sgt, scale)) for s, r in res.items()}

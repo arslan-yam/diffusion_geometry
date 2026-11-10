@@ -1,6 +1,7 @@
 #!/bin/bash
 # Two short jobs (<30 min): checks the GPU stack, the pretrained-model path and the original package.
 cd "$(dirname "$0")/.." && source hpc/config.sh && mkdir -p logs results/smoke
+[ "$ACCOUNT" = proj_XXXX ] && { echo "Run: mp, then: echo proj_NNNN > ~/.dg_account"; exit 1; }
 G="-A $ACCOUNT --constraint=$GPU_CONSTRAINT -t 00:30:00"
 sbatch -J smoke_gpu -o logs/smoke_gpu.%j.out $G hpc/gpu.sbatch bash -c '
   python -c "import torch; print(\"cuda ok:\", torch.cuda.is_available(), torch.cuda.get_device_name(0))"

@@ -8,7 +8,7 @@ baselines including the authors' DiffusionGeometry package). `hpc/` runs everyth
 ```bash
 # login node, once
 git clone git@github.com:arslan-yam/diffusion_geometry.git ~/diffusion_geometry && cd ~/diffusion_geometry
-nano hpc/config.sh                 # set ACCOUNT (from `mp`)
+mp && echo proj_NNNN > ~/.dg_account   # your project ID
 bash hpc/setup_login.sh            # conda env, packages, original package, model + CIFAR-10 download
 bash hpc/smoke.sh                  # two <30 min test jobs; check logs/smoke_*.out
 bash hpc/submit_all.sh             # 22 jobs (18 GPU, 4 CPU)
