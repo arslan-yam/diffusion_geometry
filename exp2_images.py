@@ -102,8 +102,13 @@ for seed in map(int, a.seeds.split(",")):
                     He = np.linalg.norm(np.einsum("niil->nl", IIe), axis=1)
                     grid[s] = dict(gap=gap, mae=float(np.abs(S - Sgt).mean()), r=float(np.corrcoef(S, Sgt)[0, 1]),
                                    H_relerr=float(np.median(np.abs(He - np.linalg.norm(Hg, axis=1)) / np.linalg.norm(Hg, axis=1))),
-                                   tan_cos2=cos2, _II=IIe, _E=Ef)
+                                   tan_cos2=cos2, S=S.tolist(), _II=IIe, _E=Ef)
                 sa = max(grid, key=lambda s: grid[s]["gap"])
+                # ground-truth-free stability rule (Sec. 3.9): argmin_s mean|S(s) - S(sqrt2 s)| over valid levels
+                ks = sorted(grid)
+                stab = {ks[i]: float(np.mean(np.abs(np.array(grid[ks[i]]["S"]) - np.array(grid[ks[i + 1]]["S"]))))
+                        for i in range(len(ks) - 1) if grid[ks[i]]["gap"] > 0.25}
+                st = min(stab, key=stab.get) if stab else sa
                 # curvature-corrected extrapolation along the TRUE tangent direction at the auto level
                 ts = np.geomspace(0.05, 1.2, 8); D1, D2 = [], []
                 rr = np.random.default_rng(1)
@@ -115,7 +120,8 @@ for seed in map(int, a.seeds.split(",")):
                     D1.append([dist_to_M(torch.tensor(x + t * vt), thq[q]) for t in ts])
                     D2.append([dist_to_M(torch.tensor(x + t * vt + 0.5 * t**2 * IIvv), thq[q]) for t in ts])
                 clean = {f"{s:.4f}": {k: v for k, v in g.items() if not k.startswith("_")} for s, g in grid.items()}
-                rec = dict(base, method=f"neural_{arch}", sigma_auto=sa, train_time=ttr,
+                rec = dict(base, method=f"neural_{arch}", sigma_auto=sa, sigma_stab=st, train_time=ttr, S_gt=np.asarray(Sgt).tolist(),
+                           stab={k: v for k, v in grid[st].items() if not k.startswith("_") and k != "S"},
                            auto={k: v for k, v in grid[sa].items() if not k.startswith("_")}, grid=clean,
                            extrap_t=ts.tolist(), extrap_first=np.median(D1, 0).tolist(), extrap_second=np.median(D2, 0).tolist())
                 with open(a.out, "a") as f: f.write(json.dumps(rec) + "\n")

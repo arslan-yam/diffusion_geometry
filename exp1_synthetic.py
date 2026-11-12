@@ -30,6 +30,8 @@ p.add_argument("--steps", type=int, default=0, help="0 = auto: max(20k, 4*n/batc
 p.add_argument("--width", type=int, default=1024)
 p.add_argument("--depth", type=int, default=6)
 p.add_argument("--train_smax", type=float, default=1.0)
+p.add_argument("--train_smin", type=float, default=0.005)
+p.add_argument("--tag", default="", help="recipe label stored in every record")
 p.add_argument("--lr", type=float, default=5e-4)
 p.add_argument("--baselines", default="swh,kernel,mdg_fixed,mdg_shipped")
 p.add_argument("--dtype", default="float64", help="dtype for derivative evaluation")
@@ -61,7 +63,7 @@ def eval_tweedie(Dsig, Y, d, label, Hgt=None):
     res = {}
     for s in SIG:
         Dfn = lambda y: Dsig(y, s)
-        Ss, Sr, gaps, Hdf, Hsp, gq = [], [], [], [], [], []
+        Ss, Sr, gaps, Hdf, Hsp, gq, Str, S12 = [], [], [], [], [], [], [], []
         t = time.time()
         for y in Y:
             o = tweedie_curvature(Dfn, y, d)
@@ -70,7 +72,13 @@ def eval_tweedie(Dsig, Y, d, label, Hgt=None):
                 r = Dfn(y) - y; E = o["E"]; rT = E @ (E.T @ r)
             Hdf.append(((2 / s**2) * (r - rT)).cpu().numpy()); gq.append(rT.norm().item() / s**2)
             Hsp.append(torch.einsum("iil->l", o["II"]).detach().cpu().numpy())
-        res[s] = dict(S_sp=np.array(Ss), S_raw=np.array(Sr), gap=float(np.median(gaps)), time=time.time() - t,
+            # first-order curvature from the Jacobian spectrum (uniform density): tr G = d - eps*S/2 + ...,
+            # and S = 4|N s|^2 - (2/eps) sum_{i>d} lam_i with s = (D(y)-y)/eps  (only the full spectrum is used)
+            lam = o["lam"]; e2 = s**2
+            Str.append((2 * (d - lam.sum()) / e2).item())
+            S12.append((4 * ((r - rT).norm() / e2) ** 2 - 2 * lam[d:].sum() / e2).item())
+        res[s] = dict(S_sp=np.array(Ss), S_raw=np.array(Sr), S_tr=np.array(Str), S_12=np.array(S12),
+                      gap=float(np.median(gaps)), time=time.time() - t,
                       gradlogq=float(np.median(gq)))
         if Hgt is not None:
             sc = np.linalg.norm(Hgt, axis=1).mean() + 1e-12
@@ -99,7 +107,7 @@ for man in a.mans.split(","):
                 Hg = np.einsum("niil->nl", IIgt)
                 HgD = Hg @ Q.T                                    # true mean-curvature vectors in R^D
                 scale = float((np.sum(Hg**2, 1) + np.sum(IIgt**2, (1, 2, 3))).mean())
-                R = dict(man=man, d=d, n=n, seed=seed, D=D, noise=a.noise, S_gt_mean=float(Sgt.mean()), scale=scale, methods={})
+                R = dict(man=man, d=d, n=n, seed=seed, D=D, noise=a.noise, tag=a.tag, width=a.width, depth=a.depth, lr=a.lr, S_gt_mean=float(Sgt.mean()), scale=scale, methods={})
                 print(f"== {man} d={d} D={D} n={n} seed={seed}", flush=True)
                 # ---------------- baselines
                 bl = a.baselines.split(",")
@@ -137,7 +145,7 @@ for man in a.mans.split(","):
                 t = time.time()
                 steps = a.steps or max(20000, 4 * n // 512)
                 net = ResMLP(D, a.width, a.depth)
-                Dnet = train_edm(net, X, steps, lr=a.lr, sigma_range=(0.005, a.train_smax), device=dev, seed=seed)
+                Dnet = train_edm(net, X, steps, lr=a.lr, sigma_range=(a.train_smin, a.train_smax), device=dev, seed=seed)
                 ttrain = time.time() - t
                 Dnet = Dnet.to(edt)
                 with torch.no_grad():
@@ -159,7 +167,10 @@ for man in a.mans.split(","):
                         R["methods"]["neural_stab"] = dict(summ(res[st]["S_sp"], Sgt, scale), sigma=st)
                     R["methods"]["neural_byproducts_auto"] = {k: valid[sa].get(k) for k in ("H_df_err", "H_sp_err", "gradlogq")}
                 R["methods"]["neural_grid"] = {f"{s:.4f}": dict(gap=r["gap"], H_df_err=r.get("H_df_err"), H_sp_err=r.get("H_sp_err"),
-                                                         gradlogq=r["gradlogq"], **summ(r["S_sp"], Sgt, scale)) for s, r in res.items()}
+                                                         gradlogq=r["gradlogq"], **summ(r["S_sp"], Sgt, scale),
+                                                         raw_nmae=summ(r["S_raw"], Sgt, scale)["nmae"],
+                                                         tr_nmae=summ(r["S_tr"], Sgt, scale)["nmae"],
+                                                         s12_nmae=summ(r["S_12"], Sgt, scale)["nmae"]) for s, r in res.items()}
                 R["train_time"] = ttrain; R["steps"] = steps
                 with open(a.out, "a") as f: f.write(json.dumps(R) + "\n")
                 print("   ", {k: (v.get("nmae") if isinstance(v, dict) else None) for k, v in R["methods"].items() if k != "neural_grid"}, flush=True)

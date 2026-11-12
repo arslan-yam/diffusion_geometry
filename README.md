@@ -26,6 +26,17 @@ fixed by resubmitting the same command (the lines are in `hpc/submit_all.sh`).
 | P4 | `p4_<man><d>` | Kernel-to-neural crossover in n; does d=16 become solvable at n=100k–500k? |
 | P5 | `p5_noise<level>` | Noise robustness across seeds in R^128 |
 
+## Round 2 (`bash hpc/submit_rerun.sh`, 10 GPU jobs, writes `results/*_r2.json[l]`)
+| Jobs | Why |
+|---|---|
+| `r1_*_pilot`, `r2_*_long` | Round 1: T^8, T^16 and 1/3 of S^16 runs collapsed to D≈c_skip·y. Retry with the CPU-pilot recipe (width 512, depth 4, lr 1e-3, σ∈[0.01,2]) and with 3× longer training. |
+| `r3_nsweep_s16_pilot` | S^16 sample-size sweep with the pilot recipe (7/15 runs abstained in round 1). |
+| `r4_trace` | Tests the trace corollary: curvature from the Jacobian spectrum alone (logged as `tr_nmae`, `s12_nmae` in `neural_grid`). |
+| `r5_*_unet` | Image manifolds again, now logging Ŝ at every σ so the pre-registered stability rule can be applied (`sigma_stab`, `stab`). |
+| `r6_cifar_*` | CIFAR-10 DDPM with k=160 eigenpairs (k=96 saturated the local dimension) plus the Jacobian trace (FLIPD-style LID). |
+
+Expected wall time with 4+ GPUs in parallel: ~6–10 h (longest: r5 and r6, 3–6 h each).
+
 ## Elsewhere (any single GPU)
 ```bash
 pip install -r requirements.txt

@@ -21,6 +21,7 @@ p.add_argument("--sigmas", default="0.1,0.2,0.4")
 p.add_argument("--k", type=int, default=96, help="eigenpairs computed (must exceed local dim)")
 p.add_argument("--m", type=int, default=16, help="Hutchinson pairs")
 p.add_argument("--iters", type=int, default=6)
+p.add_argument("--trace_probes", type=int, default=32, help="Rademacher probes for tr grad D")
 p.add_argument("--split", default="test,train")
 p.add_argument("--clf_epochs", type=int, default=15)
 p.add_argument("--out", default="results/exp3.json")
@@ -103,12 +104,18 @@ for split, ds in sets.items():
                 r = Dm(xf.float(), s).double() - xf
                 rT = E @ (E.T @ r); rN = r - rT
             eps = s * s
+            # Hutchinson trace of grad D (= diffusion LID estimate, e.g. FLIPD); by the trace corollary
+            # tr grad D = d + eps*(Lap log q - S/2) + ..., so it mixes dimension with curvature
+            gen = torch.Generator(device=dev).manual_seed(1)
+            Z = (torch.randint(0, 2, (a.trace_probes, xf.numel()), generator=gen, device=dev) * 2 - 1).to(xf.dtype)
+            trG = torch.stack([z @ torch.func.jvp(Dfn, (xf,), (z,))[1] for z in Z])
             # Bakry-Emery by-products (Sec. 3.5): derivative-free mean curvature, log-density gradient and Laplacian
             lap_logq = float((lt - 1).sum().item() / eps + 0.5 * h["H2"].item())
             rec["sig"][str(s)] = dict(dloc=dloc, lam=lam[:min(a.k, 128)].cpu().tolist(), S=h["S"].item(), S_se=h["S_se"].item(),
                                  H2=h["H2"].item(), II2=h["II2"].item(), resid=float(r.norm()),
                                  resid_T=float(rT.norm()), resid_N=float(rN.norm()),
-                                 H_df=float(2 * rN.norm() / eps), gradlogq=float(rT.norm() / eps), lap_logq=lap_logq,
+                                 H_df=float(2 * rN.norm() / eps), trG=float(trG.mean()), trG_se=float(trG.std() / len(trG) ** 0.5),
+                                 lam_tail=float(lam[dloc:].sum()), gradlogq=float(rT.norm() / eps), lap_logq=lap_logq,
                                  time=time.time() - t)
         out["records"].append(rec)
         if len(out["records"]) % 10 == 0:
@@ -126,6 +133,6 @@ for s in map(float, a.sigmas.split(",")):
         for c in range(10):
             i = y == c; vr[i] = rankdata(v[i]) / i.sum(); mr[i] = rankdata(mg[i]) / i.sum()
         return spearmanr(vr, mr)
-    for name in ("dloc", "S", "H2", "II2", "resid", "H_df", "gradlogq", "lap_logq"):
+    for name in ("dloc", "S", "H2", "II2", "resid", "H_df", "gradlogq", "lap_logq", "trG"):
         v = np.array([r["sig"][str(s)][name] for r in R])
         print(f"sigma={s} within-class spearman({name}, margin) = {within(v)}")
